@@ -51,9 +51,9 @@ async function confirmStripePayment(){
   try{
     const response=await fetch('/api/payment-status?session_id='+encodeURIComponent(sessionId),{cache:'no-store'}),data=await response.json();
     if(!response.ok||!data.paid)throw Error(data.error||'No pudimos confirmar el pago.');
-    const total=money(data.amount/100),receipt=data.receiptUrl||'Stripe confirmó el pago; el comprobante está disponible en el recibo de Stripe.';
-    const message='Hola, realicé una compra en MakeUpPoint.\\nFolio: '+data.orderRef+'\\nCompra: '+data.items.join(', ')+'\\nTotal pagado: '+total+'\\nComprobante Stripe: '+receipt+'\\nTienda: https://makeuppointcuu.vercel.app/\\nAcordamos el envío por WhatsApp.';
-    document.querySelector('#payment-result').innerHTML='<b>¡Pago confirmado!</b><p>Folio '+data.orderRef+' · '+total+'</p>'+(data.receiptUrl?'<a target="_blank" rel="noopener" href="'+data.receiptUrl+'">Ver comprobante de Stripe</a>':'<p>Stripe confirmó el pago; revisa el recibo que te envió Stripe.</p>')+'<button class="cta checkout" onclick="sendPaidWhatsApp()">ENVIAR COMPRA POR WHATSAPP</button>';
+    const total=money(data.amount/100),receipt=data.receiptUrl||'Stripe confirmó el pago; consulta el comprobante que te envió Stripe.';
+    const message='Hola, realicé y pagué una compra en MakeUpPoint.\nFolio: '+data.orderRef+'\nProductos: '+data.items.join(', ')+'\nTotal pagado: '+total+'\nComprobante de Stripe: '+receipt+'\nTienda: https://makeuppointcuu.vercel.app/\n¿En qué zona del centro te interesa recibir tu pedido? Las entregas son después de las 7:30 pm; sábados y domingos, todo el día.';
+    document.querySelector('#payment-result').innerHTML='<b>¡Pago confirmado!</b><p>Folio '+data.orderRef+' · '+total+'</p>'+(data.receiptUrl?'<a target="_blank" rel="noopener" href="'+data.receiptUrl+'">Ver comprobante de Stripe</a>':'<p>Stripe confirmó el pago; revisa el recibo que te envió Stripe.</p>')+'<button class="cta checkout" onclick="sendPaidWhatsApp()">ENVIAR COMPROBANTE Y COORDINAR ENTREGA POR WHATSAPP</button>';
     window.sendPaidWhatsApp=()=>window.open('https://wa.me/526142115761?text='+encodeURIComponent(message),'_blank','noopener,noreferrer');
     cart=[];document.querySelector('#count').textContent='0';renderCart();document.querySelector('#payment-result').classList.add('visible');cartToggle();
     history.replaceState({},'',location.pathname+location.hash);
