@@ -1,1 +1,26 @@
-const {catalog,redis}=require("../lib/commerce");module.exports=async(req,res)=>{res.setHeader("Cache-Control","no-store");if(req.method!=="POST")return res.status(405).end();let items=[],held=false,folio;try{const grouped={};for(const row of req.body?.items||[]){const p=catalog.find(x=>x.name===row.name),q=Number(row.quantity);if(!p||!Number.isInteger(q)||q<1||q>24)return res.status(400).json({error:"Cantidad no válida"});grouped[p.name]=(grouped[p.name]||0)+q}items=Object.entries(grouped).map(([name,quantity])=>({name,quantity,p:catalog.find(x=>x.name===name)}));if(!items.length)return res.status(400).json({error:"Bolsita vacía"});await redis(["SET","mp:quote:seq","99","NX"]);folio=String(await redis(["INCR","mp:quote:seq"]));const keys=items.map(i=>"mp:stock:"+encodeURIComponent(i.name)),lua="for i=1,#KEYS do if redis.call('EXISTS',KEYS[i])==0 then redis.call('SET',KEYS[i],ARGV[i]) end end;for i=1,#KEYS do if tonumber(redis.call('GET',KEYS[i]))<tonumber(ARGV[#KEYS+i]) then return 0 end end;for i=1,#KEYS do redis.call('DECRBY',KEYS[i],ARGV[#KEYS+i]) end;return 1";if(!Number(await redis(["EVAL",lua,String(keys.length),...keys,...items.map(i=>i.p.stock),...items.map(i=>i.quantity)])))return res.status(409).json({error:"Cambió la existencia; actualiza la bolsita"});held=true;const expiresAt=Date.now()+10800000,hold={type:"quote",folio,status:"pending",expiresAt,items:items.map(({name,quantity})=>({name,quantity}))};await redis(["SET","mp:res:"+folio,JSON.stringify(hold),"EX","14400"]);await redis(["ZADD","mp:pending",String(expiresAt),folio]);return res.status(200).json({folio,expiresAt})}catch(e){if(held){try{for(const i of items)await redis(["INCRBY","mp:stock:"+encodeURIComponent(i.name),String(i.quantity)]);await redis(["DEL","mp:res:"+folio]);await redis(["ZREM","mp:pending",folio])}catch{}}console.error(e.message);return res.status(500).json({error:"No se pudo crear el apartado"})}};
+const crypto=require("crypto");
+const {catalog,redis}=require("../lib/commerce");
+module.exports=async(req,res)=>{
+  res.setHeader("Cache-Control","no-store");
+  if(req.method!=="POST")return res.status(405).end();
+  try{
+    const grouped={};
+    for(const row of req.body?.items||[]){
+      const p=catalog.find(x=>x.name===row.name),q=Number(row.quantity);
+      if(!p||!Number.isInteger(q)||q<1)return res.status(400).json({error:"Cantidad no válida"});
+      grouped[p.name]=(grouped[p.name]||0)+q;
+      if(grouped[p.name]>p.stock)return res.status(400).json({error:"Cantidad no válida"});
+    }
+    const items=Object.entries(grouped).map(([name,quantity])=>{const p=catalog.find(x=>x.name===name);return{name,quantity,stock:p.stock}});
+    if(!items.length)return res.status(400).json({error:"Bolsita vacía"});
+    await redis(["SET","mp:quote:seq","99","NX"]);
+    const folio=String(await redis(["INCR","mp:quote:seq"]));
+    const token=crypto.randomBytes(24).toString("hex");
+    const draft={type:"quote-draft",folio,token,createdAt:Date.now(),items};
+    await redis(["SET","mp:quote:draft:"+folio,JSON.stringify(draft),"EX","86400"]);
+    return res.status(200).json({folio,token});
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({error:"No se pudo generar la cotización"});
+  }
+};
