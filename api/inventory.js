@@ -16,14 +16,21 @@ module.exports=async(req,res)=>{
         if(!raw){await redis(["ZREM","mp:pending",ref]);continue}
         const hold=JSON.parse(raw);
         if(hold.status!=="pending"){await redis(["ZREM","mp:pending",ref]);continue}
-        const hasDraft=Boolean(await redis(["GET","mp:quote:draft:"+ref]));
-        if(hold.type==="quote"&&!hold.session&&!hasDraft){await transitionReservation(ref,"released");continue}
-        if(Number(hold.expiresAt||0)>now)continue;
+        if(hold.type==="quote"&&!hold.session){
+          // Preserve old folios before releasing their former automatic holds.
+          const draftKey="mp:quote:draft:"+ref;
+          const draftRaw=await redis(["GET",draftKey]);
+          if(draftRaw)await redis(["PERSIST",draftKey]);
+          else await redis(["SET",draftKey,JSON.stringify({type:"quote",folio:ref,status:"pending",items:hold.items}),"NX"]);
+          await transitionReservation(ref,"released");continue;
+        }
         if(hold.session){
           const session=await stripe("checkout/sessions/"+hold.session,{},"GET");
           if(session.payment_status==="paid"){await transitionReservation(ref,"paid");continue}
+          if(Number(hold.expiresAt||0)>now&&session.status!=="expired")continue;
           if(session.status==="open")await stripe("checkout/sessions/"+session.id+"/expire",{});
         }
+        if(!hold.session&&Number(hold.expiresAt||0)>now)continue;
         await transitionReservation(ref,"released");
       }catch(e){console.error("No se pudo resolver el apartado "+ref+":",e.message)}
     }
